@@ -29,6 +29,7 @@ import tf_slim as slim
 from object_detection import eval_util
 from object_detection import exporter as exporter_lib
 from object_detection import inputs
+from object_detection.best_checkpoint_copier import BestCheckpointCopier
 from object_detection.builders import graph_rewriter_builder
 from object_detection.builders import model_builder
 from object_detection.builders import optimizer_builder
@@ -918,14 +919,27 @@ def create_train_and_eval_specs(train_input_fn,
       exporter_name = final_exporter_name
     else:
       exporter_name = '{}_{}'.format(final_exporter_name, eval_spec_name)
-    exporter = tf.estimator.FinalExporter(
+
+    best_exporter = BestCheckpointCopier(
+        name='best',  # directory within model directory to copy checkpoints to
+        checkpoints_to_keep=10,  # number of checkpoints to keep
+        score_metric='Loss/total_loss',  # eval_result metric to use to determine "best"
+        # comparison function used to determine "best" checkpoint (x is the current checkpoint; y is the previously copied checkpoint with the highest/worst score)
+        compare_fn=lambda x, y: x.score < y.score,
+        sort_key_fn=lambda x: x.score,  # key to sort on when discarding excess checkpoints
+        sort_reverse=False)  # sort order when discarding excess checkpoints
+
+    final_exporter = tf.estimator.FinalExporter(
         name=exporter_name, serving_input_receiver_fn=predict_input_fn)
+
+    exporters = [best_exporter, final_exporter]
+
     eval_specs.append(
         tf.estimator.EvalSpec(
             name=eval_spec_name,
             input_fn=eval_input_fn,
             steps=None,
-            exporters=exporter))
+            exporters=exporters))
 
   if eval_on_train_data:
     eval_specs.append(
